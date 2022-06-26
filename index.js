@@ -1,11 +1,16 @@
 const request = require("request");
+const { SNSClient, AddPermissionCommand } = require("@aws-sdk/client-sns");
 require('dotenv').config();
 
 const {PubSub} = require('@google-cloud/pubsub');
 const process = require('process');
 
 const BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
-
+// const ACCESS_KEY = process.env.AWS_SERVER_PUBLIC_KEY;
+// const ACCESS_SECRET = process.env.AWS_SERVER_SECRET_KEY;
+const token = BEARER_TOKEN;
+// const topicNameOrId = 'tweet-extractor';
+let pubSubClient = new PubSub();
 let timeout = 0;
 
 const streamURL = new URL(
@@ -16,13 +21,13 @@ const streamURL = new URL(
 
 
 
-async function publishMessage(data,topicNameOrId,pubSubClient) {
+async function publishMessage(data,pubSubClient) {
 // Publishes the message as a string, e.g. "Hello, world!" or JSON.stringify(someObject)
 const dataBuffer = Buffer.from(JSON.stringify(data));
-
+const topic = 'tweet-extractor';
 try {
     const messageId = await pubSubClient
-    .topic(topicNameOrId)
+    .topic(topic)
     .publishMessage({data: dataBuffer});
     console.log(`Message ${messageId} published.`);
     
@@ -39,7 +44,7 @@ const sleep = async (delay) => {
   return new Promise((resolve) => setTimeout(() => resolve(true), delay));
 };
 
-const streamTweets = (token,pubSubClient,topicNameOrId) => {
+const streamTweets = (token,pubSubClient) => {
   let stream;
 
   const config = {
@@ -64,14 +69,16 @@ const streamTweets = (token,pubSubClient,topicNameOrId) => {
                 // console.log(json);
                 if(json.data.lang === 'hi'){
                   // console.log(json.data.lang);
-                  publishMessage(json,topicNameOrId,pubSubClient);
+                  publishMessage(json,pubSubClient);
                   console.log('Tweet added');
                 }
                 
                 // firebase or pubsub
                 
             } else {
+
                 console.log('Auth Error');
+		            reconnect(stream, token);
             }
           }
         } catch (e) {
@@ -80,27 +87,25 @@ const streamTweets = (token,pubSubClient,topicNameOrId) => {
       })
       .on("error", (error) => {
         console.log({error: error})
-        reconnect(stream, token,pubSubClient,topicNameOrId);
+        reconnect(stream, token);
       });
   } catch (e) {
     console.log('Auth Error');
+    reconnect(stream, token);
   }
   return stream;
 };
 
-const reconnect = async (stream, token,pubSubClient,topicNameOrId) => {
+const reconnect = async (stream, token) => {
   timeout++;
   stream.abort();
   await sleep(2 ** timeout * 1000);
-  streamTweets(token,pubSubClient,topicNameOrId);
+  pubSubClient = new PubSub();
+  streamTweets(token,pubSubClient);
 };
 
 (function(){
-    const token = BEARER_TOKEN;
-    const topicNameOrId = 'tweet-extractor';
-    const pubSubClient = new PubSub();
-    // publishMessage({"data":{"created_at":"2022-06-18T16:17:04.000Z","id":"test","lang":"hi","text":"test"}},topicNameOrId,pubSubClient)
-    let stream = streamTweets(token,pubSubClient,topicNameOrId);
+    let stream = streamTweets(token,pubSubClient);
     process.on('SIGINT', function () {
         try{
             stream.abort();
